@@ -2,12 +2,16 @@ name: Publish presentations
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: publish-presentations
+  cancel-in-progress: true
 
 jobs:
   build-and-release:
@@ -24,6 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf dist
           mkdir -p dist
 
           mapfile -d '' presentations < <(
@@ -60,10 +65,22 @@ jobs:
           name: presentations
           path: dist/*.pdf
           if-no-files-found: error
+          overwrite: true
 
-      - name: Publish PDFs to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.pdf
-          generate_release_notes: true
+      - name: Update latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view latest >/dev/null 2>&1; then
+            echo "Updating existing latest release"
+          else
+            echo "Creating latest release"
+            gh release create latest \
+              --title "Latest presentations" \
+              --notes "Automatically rebuilt from the latest master commit."
+          fi
+
+          gh release upload latest dist/*.pdf --clobber
